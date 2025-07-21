@@ -139,14 +139,14 @@ def merge(pre_tokens:dict[tuple[bytes], int], vocab:dict[int, bytes], vocab_size
         vocab[len(vocab)] = merged_pair        
             
 
-def train(input_file_path:str, vocab_size:int, speical_token:list[str]):
+def train(input_path:str, vocab_size:int, speical_token:list[str]):
     #initialize vocab with 0~255 and special_token
     vocab = {i:hex(i) for i in range(256)}
     for st in speical_token:
         vocab[len(vocab.keys())-1] = st
     
     #open data and chunk it
-    with open(input_file_path, 'rb') as f:
+    with open(input_path, 'rb') as f:
         chunks = []
         with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
             boundaries = find_chunk_boundaries(mm, b"<|endoftext|>")
