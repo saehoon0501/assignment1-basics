@@ -8,7 +8,10 @@ import multiprocessing
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 
 def flatten_tuple(t):
-     for item in t:
+    if not isinstance(t, tuple):
+        yield t
+        return
+    for item in t:
         if isinstance(item, tuple):
             yield from flatten_tuple(item)
         else:
@@ -62,39 +65,34 @@ def find_chunk_boundaries(file:BinaryIO, split_special_token:bytes) -> list[int]
 def pre_tokenize(content:BinaryIO, special_tokens:list[str]) -> dict[tuple[bytes], int]:
     escaped_tokens = [re.escape(token) for token in special_tokens]
     split = re.split("|".join(escaped_tokens), content.decode("utf-8"))
-    
+    # print(split)
     result = Counter()
     for sc in split:
-        print(sc)
+        # print(sc)
         iter = re.finditer(PAT, sc)        
         for match in iter:
             pre_token = match.group()
-            print(f"text: {pre_token}")
+            # print(f"text: {pre_token}")
 
             b = pre_token.encode("utf-8")
-            print(f"binary: {[hex(byte) for byte in b]}")
+            # print(f"binary: {b}")
 
-            key = tuple(hex(byte) for byte in b)
+            key = tuple(b[i:i+1] for i in range(len(b)))
             result[key] += 1
         
-    for key, value in result.items():
-        print(f"{key}::: {value}")
+    # for key, value in result.items():
+    #     print(f"{key}::: {value}")
     return result
 
 def merge(pre_tokens:dict[tuple[bytes], int], vocab:dict[int, bytes], vocab_size:int):        
-    pair_dict = Counter() #maps pair to the total count of the pair, k:pair, v: count
-    pair_tkn_dict = {} #maps which preTokens a pair is from, k: pair, v: preToken
+    result: list[tuple[bytes, bytes]] = []# list of merges, 
+    pair_dict = Counter() #maps pair to the total count of the pair, k:pair, v: count    
     
     #initial pair by iterating all the btye sequence in pre_tokens
     for pt, count in pre_tokens.items():
         for i in range(len(pt)-1):
             pair = tuple(pt[i:i+2])
-            pair_dict[pair] += count
-            #memorize all the pretoken that contains the pair
-            if pair not in pair_tkn_dict:                
-                pair_tkn_dict[pair] = [pt]
-            elif pt not in pair_tkn_dict[pair]:
-                pair_tkn_dict[pair].append(pt)
+            pair_dict[pair] += count                        
 
     #Until satisfy the size merge
     while vocab_size - len(vocab) > 0:
@@ -108,42 +106,49 @@ def merge(pre_tokens:dict[tuple[bytes], int], vocab:dict[int, bytes], vocab_size
             #if tie, pick lexicographically greater pair
             elif count == max_count and tuple(flatten_tuple(pair)) > tuple(flatten_tuple(merged_pair)):
                 merged_pair = pair
+        
+        if merged_pair is None:
+            break # No more pairs to merge
 
-        #update any pair that's related to merged pair
-        for pre_token in pair_tkn_dict[merged_pair]:
-            for i in range(len(pre_token)):
-                if tuple(pre_token[i:i+2]) == merged_pair:
-                    new_token = pre_token[:i] + (merged_pair,) + pre_token[i+2:]
-                    #2 updated elements, the count and preTokens
-                    if i > 0:
-                        pair_dict[pre_token[i-1:i+1]] -= pre_tokens[tuple(flatten_tuple(pre_token))]
-                        if pair_dict[pre_token[i-1:i+1]] == 0:
-                            pair_dict.pop(pre_token[i-1:i+1])
-                        pair_dict[new_token[i-1:i+1]] += pre_tokens[tuple(flatten_tuple(pre_token))]
-                        if new_token[i-1:i+1] not in pair_tkn_dict:
-                            pair_tkn_dict[new_token[i-1:i+1]] = [new_token]
-                        else:
-                            pair_tkn_dict[new_token[i-1:i+1]].append(new_token)
+        result.append((b"".join(flatten_tuple(merged_pair[0])), b"".join(flatten_tuple(merged_pair[1]))))
+        
+        new_merged_token = b"".join(flatten_tuple(merged_pair))
+        vocab[len(vocab)] = new_merged_token
+        
+        # Update pre_tokens with the new merged token        
+        new_pre_tokens = {}
+        for pre_token, count in pre_tokens.items():
+            i = 0
+            new_token = pre_token
+            while i < len(new_token) - 1:
+                if new_token[i:i+2] == merged_pair:
+                    new_token = new_token[:i] + (new_merged_token,) + new_token[i+2:]
+                i += 1
+            if new_token != pre_token:
+                new_pre_tokens[pre_token] = new_token
+        
+        # Apply the updates to pre_tokens and only update the affected pair
+        for old_token, new_token in new_pre_tokens.items():
+            count = pre_tokens[old_token]
+            del pre_tokens[old_token]
+            pre_tokens[new_token] += count
 
-                    if i < len(pre_token) - 2:
-                        pair_dict[pre_token[i+1:i+3]] -= pre_tokens[tuple(flatten_tuple(pre_token))]
-                        if pair_dict[pre_token[i+1:i+3]] == 0:
-                            pair_dict.pop(pre_token[i+1:i+3])
-                        pair_dict[new_token[i:i+2]] += pre_tokens[tuple(flatten_tuple(pre_token))]
-                        if new_token[i:i+2] not in pair_tkn_dict:
-                            pair_tkn_dict[new_token[i:i+2]] = [new_token]
-                        else:
-                            pair_tkn_dict[new_token[i:i+2]].append(new_token)
-        pair_dict.pop(merged_pair)            
-        pair_tkn_dict.pop(merged_pair)
-        vocab[len(vocab)] = merged_pair        
-            
+            for i in range(len(old_token)-1):
+                pair_dict[tuple(old_token[i:i+2])] -= count
+
+                if pair_dict[tuple(old_token[i:i+2])] <= 0:
+                    del pair_dict[tuple(old_token[i:i+2])]
+
+            for i in range(len(new_token)-1):
+                pair_dict[tuple(new_token[i:i+2])] += count
+        
+    return result
 
 def train(input_path:str, vocab_size:int, speical_token:list[str]):
     #initialize vocab with 0~255 and special_token
-    vocab = {i:hex(i) for i in range(256)}
+    vocab = {i: bytes([i]) for i in range(256)}
     for st in speical_token:
-        vocab[len(vocab.keys())-1] = st
+        vocab[len(vocab)] = st.encode("utf-8")
     
     #open data and chunk it
     with open(input_path, 'rb') as f:
@@ -163,10 +168,18 @@ def train(input_path:str, vocab_size:int, speical_token:list[str]):
     for result in mp_results:
         pre_tokens.update(result)
     
-    for key, value in pre_tokens.items():
-        print(f"{key}::: {value}")
+    # for key, value in pre_tokens.items():
+    #     print(f"{key}::: {value}")
 
-    merge(pre_tokens, vocab, vocab_size)
+    merges = merge(pre_tokens, vocab, vocab_size)
 
-if __name__ == "__main__":
-    train('/Users/sehoonbyun/Documents/cs336/assignment1-basics/data/TinyStoriesV2-GPT4-valid.txt', 263, '<|endoftext|>')
+    return vocab, merges
+
+# if __name__ == "__main__":
+    # train('/Users/sehoonbyun/Documents/cs336/assignment1-basics/data/TinyStoriesV2-GPT4-valid.txt', 263, '<|endoftext|>')
+    # pre_tokens = pre_tokenize("low low low low low lower lower widest widest widest newest newest newest newest newest newest".encode('utf-8'), ['<|endoftext|>'])
+    # vocab = {i:hex(i) for i in range(256)}
+    # speical_token = ['<|endoftext|>']
+    # for st in speical_token:
+    #     vocab[len(vocab.keys())-1] = st
+    # merge(pre_tokens, vocab, 263)

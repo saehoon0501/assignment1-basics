@@ -589,6 +589,6 @@ def run_train_bpe(
                 BPE merges. Each list item is a tuple of bytes (<token1>, <token2>),
                 representing that <token1> was merged with <token2>.
                 Merges are ordered by order of creation.
-    """
-    train(input_path, vocab_size, special_tokens)
-    raise NotImplementedError
+    """    
+        
+    return train(input_path, vocab_size, special_tokens)
