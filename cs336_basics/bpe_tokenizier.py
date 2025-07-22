@@ -1,7 +1,7 @@
 import os
 import regex as re
 import mmap
-from typing import BinaryIO
+from typing import BinaryIO, Iterable, Iterator
 from collections import Counter
 import multiprocessing
 
@@ -163,3 +163,194 @@ def train(input_path:str, vocab_size:int, special_token:list[str]):
     merges = merge(pre_tokens, vocab, vocab_size)
 
     return vocab, merges
+
+class BPETokenizer:
+    def __init__(
+        self,
+        vocab: dict[int, bytes],
+        merges: list[tuple[bytes, bytes]],
+        special_tokens: list[str] | None = None,
+    ):
+        self.vocab = vocab
+        self.merges = {pair: i for i, pair in enumerate(merges)}
+        self.special_tokens = special_tokens
+
+        # Create reverse lookup: bytes -> int (for fast encoding)
+        self.token_to_id = {
+            token_bytes: token_id for token_id, token_bytes in vocab.items()
+        }
+
+    # Class method that constructs and return a Tokenizer from a serialized vocabulary
+    # and list of merges
+    # def from_files(
+    #     cls, 
+    #     vocab_filepath:str, 
+    #     merges_filepath:str, 
+    #     special_tokens: list[str] | None =None
+    # ):
+
+    def _tokenize_text(self, text: str) -> list[tuple[bytes, ...]]:
+        """
+        Tokenize text preserving order (for encoding), unlike pre_tokenize which counts.
+        Returns a list of token tuples in original order.
+        Should preserve special_tokens
+        """
+        if not self.special_tokens:
+            special_tokens = []
+        else:
+            special_tokens = self.special_tokens
+            
+        # Sort special tokens by length (descending) to handle overlapping tokens correctly
+        sorted_tokens = sorted(special_tokens, key=len, reverse=True)
+        escaped_tokens = [re.escape(token) for token in sorted_tokens]
+        # Use capturing groups to preserve special tokens in split result
+        pattern = f"({('|'.join(escaped_tokens))})" if escaped_tokens else None
+        split = re.split(pattern, text) if pattern else [text]
+        
+        tokens_in_order = []
+        for sc in split:
+            if not sc:  # Skip empty strings
+                continue
+                
+            # Check if this segment is a special token
+            if sc in special_tokens:
+                # Special tokens are added directly as single tokens
+                b = sc.encode("utf-8")
+                key = tuple(b[i:i+1] for i in range(len(b)))
+                tokens_in_order.append(key)
+            else:
+                # Regular text segments are processed with PAT regex
+                iter = re.finditer(PAT, sc)
+                for match in iter:
+                    pre_token = match.group()
+                    b = pre_token.encode("utf-8")
+                    key = tuple(b[i:i+1] for i in range(len(b)))
+                    tokens_in_order.append(key)
+        
+        return tokens_in_order
+
+    # Encode an input text into a sequence of token IDs.
+    def encode(self, text: str) -> list[int]:
+        # Get tokens in order (not counts)
+        tokens_in_order = self._tokenize_text(text)
+
+        # Apply the merges for every preToken
+        merged_tokens = []
+        for pt in tokens_in_order:
+            # MUST not merge any special tokens
+            if self.special_tokens is not None:
+                # Check if this token corresponds to a special token
+                pt_str = b"".join(pt).decode("utf-8")
+                if pt_str in self.special_tokens:
+                    merged_tokens.append(pt)
+                    continue
+
+            while len(pt) >= 2:
+                # Find the best pair to merge
+                best_pair_idx = -1
+                best_pair_rank = float("inf")
+
+                for i in range(len(pt) - 1):
+                    pair = (pt[i], pt[i + 1])
+                    rank = self.merges.get(pair)
+                    if rank is not None and rank < best_pair_rank:
+                        best_pair_rank = rank
+                        best_pair_idx = i
+
+                if best_pair_idx == -1:
+                    break  # No more merges possible
+
+                # Merge the best pair
+                i = best_pair_idx
+                merged_bytes = pt[i] + pt[i + 1]
+                pt = pt[:i] + (merged_bytes,) + pt[i + 2 :]
+
+            merged_tokens.append(pt)
+
+        # convert all the bytes into token ID
+        result = []
+        for mt in merged_tokens:
+            bytes_token = b"".join(mt)
+            
+            if bytes_token in self.token_to_id:
+                # Token exists in vocab
+                token_id = self.token_to_id[bytes_token]
+                result.append(token_id)
+            else:
+                # FALLBACK: Split into individual bytes (which MUST exist in vocab)
+                for byte_piece in mt:
+                    if byte_piece in self.token_to_id:
+                        result.append(self.token_to_id[byte_piece])
+                    else:
+                        raise KeyError(f"Individual byte {byte_piece} not in vocab - this shouldn't happen!")
+        
+        return result
+
+
+    # Given an iterable of strings (e.g., a Python file handle), return a generator that lazily yields token IDs. 
+    # This is required for memory-eﬀicient tokenization of large files that we cannot directly load into memory.
+    def encode_iterable(self, iterable: Iterable[str]) -> Iterator[int]:
+        for line in iterable:
+            tokens_in_order = self._tokenize_text(line)
+
+            # Apply the merges and yield token ID
+            for pt in tokens_in_order:
+                if self.special_tokens is not None:
+                    # Check if this token corresponds to a special token
+                    pt_str = b"".join(pt).decode("utf-8")
+                    if pt_str in self.special_tokens:
+                        bytes_token = b"".join(pt)
+                        if bytes_token in self.token_to_id:
+                            yield self.token_to_id[bytes_token]
+                        else:
+                            for byte_piece in pt:
+                                if byte_piece in self.token_to_id:
+                                    yield (self.token_to_id[byte_piece])
+                                else:
+                                    raise KeyError(
+                                        f"Individual byte {byte_piece} not in vocab - this shouldn't happen!"
+                                    )
+                        continue
+
+                while len(pt) >= 2:
+                    # Find the best pair to merge
+                    best_pair_idx = -1
+                    best_pair_rank = float("inf")
+
+                    for i in range(len(pt) - 1):
+                        pair = (pt[i], pt[i + 1])
+                        rank = self.merges.get(pair)
+                        if rank is not None and rank < best_pair_rank:
+                            best_pair_rank = rank
+                            best_pair_idx = i
+
+                    if best_pair_idx == -1:
+                        break  # No more merges possible
+
+                    # Merge the best pair
+                    i = best_pair_idx
+                    merged_bytes = pt[i] + pt[i + 1]
+                    pt = pt[:i] + (merged_bytes,) + pt[i + 2 :]
+
+                bytes_token = b"".join(pt)
+                if bytes_token in self.token_to_id:
+                    yield self.token_to_id[bytes_token]
+                else:
+                    for byte_piece in pt:
+                        if byte_piece in self.token_to_id:
+                            yield (self.token_to_id[byte_piece])
+                        else:
+                            raise KeyError(
+                                f"Individual byte {byte_piece} not in vocab - this shouldn't happen!"
+                            )
+
+    # Decode a sequence of token IDs into text.
+    def decode(self, ids: list[int]) -> str:
+        # Collect all bytes first, then decode the entire sequence
+        result_bytes = b""
+        for token_id in ids:
+            result_bytes += self.vocab[token_id]
+        
+        # Decode the entire byte sequence as UTF-8
+        # Use 'replace' to handle any invalid UTF-8 sequences gracefully
+        return result_bytes.decode('utf-8', errors='replace')
