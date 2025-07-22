@@ -64,24 +64,16 @@ def find_chunk_boundaries(file:BinaryIO, split_special_token:bytes) -> list[int]
     
 def pre_tokenize(content:BinaryIO, special_tokens:list[str]) -> dict[tuple[bytes], int]:
     escaped_tokens = [re.escape(token) for token in special_tokens]
-    split = re.split("|".join(escaped_tokens), content.decode("utf-8"))
-    # print(split)
+    split = re.split("|".join(escaped_tokens), content.decode("utf-8"))    
     result = Counter()
-    for sc in split:
-        # print(sc)
+    for sc in split:        
         iter = re.finditer(PAT, sc)        
         for match in iter:
             pre_token = match.group()
-            # print(f"text: {pre_token}")
-
             b = pre_token.encode("utf-8")
-            # print(f"binary: {b}")
-
             key = tuple(b[i:i+1] for i in range(len(b)))
             result[key] += 1
         
-    # for key, value in result.items():
-    #     print(f"{key}::: {value}")
     return result
 
 def merge(pre_tokens:dict[tuple[bytes], int], vocab:dict[int, bytes], vocab_size:int):        
@@ -144,42 +136,30 @@ def merge(pre_tokens:dict[tuple[bytes], int], vocab:dict[int, bytes], vocab_size
         
     return result
 
-def train(input_path:str, vocab_size:int, speical_token:list[str]):
+def train(input_path:str, vocab_size:int, special_token:list[str]):
     #initialize vocab with 0~255 and special_token
     vocab = {i: bytes([i]) for i in range(256)}
-    for st in speical_token:
+    for st in special_token:
         vocab[len(vocab)] = st.encode("utf-8")
     
     #open data and chunk it
     with open(input_path, 'rb') as f:
         chunks = []
         with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
-            boundaries = find_chunk_boundaries(mm, b"<|endoftext|>")
+            boundaries = find_chunk_boundaries(mm, special_token[0].encode("utf-8"))
 
             for start, end in zip(boundaries[:-1], boundaries[1:]):
                 chunks.append(mm[start:end])
         
     #use multiprocess on chunks and aggregate the pre_token counts
-    args = [(chunk, speical_token) for chunk in chunks]
-    with multiprocessing.Pool(5) as pool:
+    args = [(chunk, special_token) for chunk in chunks]
+    with multiprocessing.Pool(20) as pool:
         mp_results = pool.starmap(pre_tokenize, args)
 
     pre_tokens = Counter()
     for result in mp_results:
-        pre_tokens.update(result)
-    
-    # for key, value in pre_tokens.items():
-    #     print(f"{key}::: {value}")
+        pre_tokens.update(result)    
 
     merges = merge(pre_tokens, vocab, vocab_size)
 
     return vocab, merges
-
-# if __name__ == "__main__":
-    # train('/Users/sehoonbyun/Documents/cs336/assignment1-basics/data/TinyStoriesV2-GPT4-valid.txt', 263, '<|endoftext|>')
-    # pre_tokens = pre_tokenize("low low low low low lower lower widest widest widest newest newest newest newest newest newest".encode('utf-8'), ['<|endoftext|>'])
-    # vocab = {i:hex(i) for i in range(256)}
-    # speical_token = ['<|endoftext|>']
-    # for st in speical_token:
-    #     vocab[len(vocab.keys())-1] = st
-    # merge(pre_tokens, vocab, 263)
