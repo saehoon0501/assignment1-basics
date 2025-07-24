@@ -13,7 +13,7 @@ from cs336_basics.bpe_tokenizier import train, BPETokenizer
 from cs336_basics.linear import Linear
 from cs336_basics.embedding import Embedding
 from cs336_basics.layer_norm import RMSNorm
-
+from cs336_basics.feed_forward import FeedForward
 
 
 def run_linear(
@@ -94,7 +94,14 @@ def run_swiglu(
     # swiglu.w1.weight.data = w1_weight
     # swiglu.w2.weight.data = w2_weight
     # swiglu.w3.weight.data = w3_weight
-    raise NotImplementedError
+    feed_forward = FeedForward(d_model, d_ff)
+
+    with torch.no_grad():
+        feed_forward.weights_1.copy_(w1_weight)
+        feed_forward.weights_2.copy_(w2_weight)
+        feed_forward.weights_3.copy_(w3_weight)
+        return feed_forward.forward(in_features)
+
 
 
 def run_scaled_dot_product_attention(
