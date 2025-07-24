@@ -15,12 +15,12 @@ class Linear(torch.nn.Module):
         self.device = device
         self.dtype = dtype
 
-        self.weight = torch.nn.Parameter(
+        self.weights = torch.nn.Parameter(
             torch.empty(out_features, in_features, device=device, dtype=dtype)
         )
 
-        torch.nn.init.trunc_normal_(self.weight)
+        torch.nn.init.trunc_normal_(self.weights)
 
     # Apply the linear transformation to the input
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return einsum(x, self.weight, "... in_features, out_features in_features -> ... out_features")
+        return einsum(x, self.weights, "... in_features, out_features in_features -> ... out_features")
