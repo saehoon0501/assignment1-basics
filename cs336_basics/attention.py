@@ -38,3 +38,22 @@ def scaled_dot_product_attention(
     output = einsum(attention_weights, V, "... queries keys, ... keys d_v -> ... queries d_v")
     
     return output
+
+class MultiHeadAttention(torch.nn.Module):
+    """
+    
+    """
+    def __init__(
+        self,
+        d_model: int,
+        num_heads: int
+    ):
+        super().__init__()
+        self.d_model = d_model
+        self.num_heads = num_heads
+
+    
+    def forward():
+        """
+        
+        """

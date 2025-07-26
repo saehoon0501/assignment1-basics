@@ -16,7 +16,7 @@ from cs336_basics.layer_norm import RMSNorm
 from cs336_basics.feed_forward import FeedForward
 from cs336_basics.positional_embedding import RotaryPositionalEmbedding
 from cs336_basics.softmax import softmax
-from cs336_basics.attention import scaled_dot_product_attention
+from cs336_basics.attention import scaled_dot_product_attention, MultiHeadAttention
 
 def run_linear(
     d_in: int,
