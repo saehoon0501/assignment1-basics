@@ -47,7 +47,7 @@ class RotaryPositionalEmbedding(torch.nn.Module):
         # Reshape x to treat pairs of features
         # x: (..., sequence_length, d_k) -> (..., sequence_length, d_k/2, 2)
         # x_reshaped = x.reshape(*x.shape[:-1], -1, 2)
-        x_reshaped = rearrange(x, "... sequence_length (d_k_half k) -> ... sequence_length d_k_half p", p=2)
+        x_reshaped = rearrange(x, "... sequence_length (d_k_half p) -> ... sequence_length d_k_half p", p=2)
         x1, x2 = x_reshaped.unbind(-1)
 
         # Apply the rotation to pairs of features
