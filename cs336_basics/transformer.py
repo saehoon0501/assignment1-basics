@@ -53,7 +53,7 @@ class TransformerBlock(torch.nn.Module):
 
         return ff
     
-class Transformer(torch.nn.Module):
+class TransformerLM(torch.nn.Module):
     def __init__(
         self,
         vocab_size: int,
