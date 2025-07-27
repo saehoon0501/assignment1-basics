@@ -4,8 +4,10 @@ from .feed_forward import FeedForward
 from .layer_norm import RMSNorm
 from jaxtyping import Float
 import torch
+from .token_embedding import Embedding
+from .linear import Linear
 
-class TransformerBlock:
+class TransformerBlock(torch.nn.Module):
     def __init__(
         self,
         d_model: int,
@@ -15,6 +17,7 @@ class TransformerBlock:
         theta: float,
         weights: dict[str, Tensor],
     ):
+        super().__init__()
         self.multi_head_attention = MultiHeadAttention(
             d_model, 
             num_head, 
@@ -49,3 +52,45 @@ class TransformerBlock:
         ff = multi_attention + residual
 
         return ff
+    
+class Transformer(torch.nn.Module):
+    def __init__(
+        self,
+        vocab_size: int,
+        context_length: int,
+        d_model: int,
+        num_layers: int,
+        num_heads: int,
+        d_ff: int,
+        rope_theta: float,
+        weights: dict[str, Tensor],
+    ):
+        super().__init__()
+        self.token_embeddings = Embedding(vocab_size, d_model)
+        self.token_embeddings.embedding_mat = torch.nn.Parameter(weights['token_embeddings.weight'])
+
+        self.layers = torch.nn.ModuleList([
+            TransformerBlock(
+                d_model=d_model,
+                num_head=num_heads,
+                d_ff=d_ff,
+                max_seq_len=context_length,
+                theta=rope_theta,
+                weights={k.split('.', 2)[-1]: v for k, v in weights.items() if k.startswith(f"layers.{i}.")}
+            ) for i in range(num_layers)
+        ])
+
+        self.ln_final = RMSNorm(d_model)
+        self.ln_final.weights = torch.nn.Parameter(weights['ln_final.weight'])
+        
+        self.lm_head = Linear(d_model, vocab_size)
+        self.lm_head.weights = torch.nn.Parameter(weights['lm_head.weight'])
+
+    def forward(self, in_indices:Float[Tensor, "batch_size sequence_length"]) -> Tensor:
+        x = self.token_embeddings.forward(in_indices)
+        for layer in self.layers:
+            x = layer.forward(x)
+        x = self.ln_final.forward(x)
+        logits = self.lm_head.forward(x)
+        return logits
+    
