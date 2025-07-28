@@ -43,7 +43,7 @@ class TransformerBlock(torch.nn.Module):
 
     def forward(self, in_features:Float[Tensor, "batch sequence_length d_model"]) -> Tensor:
         # y= x + MultiHeadSelfAttention(RMSNorm(x))
-        token_positions = torch.arange(in_features.shape[1], device=in_features.device).unsqueeze(0)
+        token_positions = torch.arange(in_features.shape[1], device=in_features.device).unsqueeze(0) # unsqueeze for broadcasting
         residual = self.multi_head_attention.forward(self.rms_norm_1.forward(in_features), token_positions=token_positions)
         multi_attention = in_features + residual
 
@@ -87,6 +87,15 @@ class TransformerLM(torch.nn.Module):
         self.lm_head.weights = torch.nn.Parameter(weights['lm_head.weight'])
 
     def forward(self, in_indices:Float[Tensor, "batch_size sequence_length"]) -> Tensor:
+        """ 
+        Args:
+            in_indices (Int[Tensor, "batch_size sequence_length"]) Tensor with input indices to run the language model on. 
+            Shape is (batch_size, sequence_length), where `sequence_length` is at most `context_length`.
+        
+         Returns:
+            Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
+            next-word distribution for each token.
+        """
         x = self.token_embeddings.forward(in_indices)
         for layer in self.layers:
             x = layer.forward(x)
