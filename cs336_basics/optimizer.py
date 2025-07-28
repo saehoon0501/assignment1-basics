@@ -23,6 +23,27 @@ def lr_cosine_schedule(
     # (Post-annealing) If t > Tc
     return min_learning_rate
 
+def gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm: float) -> None:
+    """
+    Clips the gradients of the given parameters in-place.
+    """
+    grads = [p.grad for p in parameters if p.grad is not None]
+    if not grads:
+        return
+
+    # A small epsilon to prevent division by zero, as per PyTorch default
+    epsilon = 1e-6
+
+    # Calculate the total L2 norm of all gradients
+    total_norm = torch.sqrt(sum(torch.sum(grad.pow(2)) for grad in grads))
+
+    # Calculate the clipping coefficient
+    clip_coef = max_l2_norm / (total_norm + epsilon)
+
+    # If the total norm is greater than the max norm, clip the gradients
+    if clip_coef < 1.0:
+        for grad in grads:
+            grad.mul_(clip_coef)
 
 class AdamW(torch.optim.Optimizer):
     def __init__(
