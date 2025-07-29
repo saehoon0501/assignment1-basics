@@ -6,6 +6,7 @@ from jaxtyping import Float
 import torch
 from .token_embedding import Embedding
 from .linear import Linear
+from .softmax import softmax
 
 class TransformerBlock(torch.nn.Module):
     def __init__(
@@ -102,4 +103,67 @@ class TransformerLM(torch.nn.Module):
         x = self.ln_final.forward(x)
         logits = self.lm_head.forward(x)
         return logits
+    
+def _sample_top_p(probs, p):
+    probs_sort, probs_idx = torch.sort(probs, dim=-1, descending=True)
+    probs_sum = torch.cumsum(probs_sort, dim=-1)
+    mask = (probs_sum - probs_sort) > p # smallest set of indices such that ∑j∈V (p) qj ≥p
+    probs_sort[mask] = 0.0
+    probs_sort.div_(probs_sort.sum(dim=-1, keepdim=True))
+    next_token = torch.multinomial(probs_sort, num_samples=1)
+    next_token = torch.gather(probs_idx, -1, next_token)
+    return next_token
+
+def generate(
+    model: TransformerLM,
+    prompt: Tensor,
+    max_new_tokens: int,
+    temperature: float = 1.0,
+    top_p: float | None = None,
+) -> Tensor:
+    """
+    Generate text from a model.
+
+    Args:
+        model: The model to generate from.
+        prompt (Tensor): A batch of prompts to start generation from.
+        max_new_tokens (int): The maximum number of new tokens to generate.
+        temperature (float): The temperature to use for sampling.
+        top_p (float | None): The top-p value to use for sampling. If None, use greedy decoding.
+
+    Returns:
+        Tensor: The generated text, including the prompt.
+    """
+    for _ in range(max_new_tokens):
+        # crop context if needed
+        prompt_cond = (
+            prompt
+            if prompt.size(1) <= model.layers[0].max_seq_len
+            else prompt[:, -model.layers[0].max_seq_len :]
+        )
+
+        # get model output
+        logits = model(prompt_cond)
+
+        # get logits for the last token
+        logits = logits[:, -1, :]
+
+        # apply temperature
+        if temperature > 0:
+            logits = logits / temperature
+
+        # get probabilities
+        probs = softmax(logits, dim=-1)
+
+        # sample from the distribution
+        if top_p is not None:
+            next_token = _sample_top_p(probs, top_p)
+        else:
+            next_token = torch.argmax(probs, dim=-1, keepdim=True)
+
+        # append the token to the prompt
+        prompt = torch.cat([prompt, next_token], dim=1)
+
+    return prompt
+    
     
