@@ -1,9 +1,14 @@
 import torch
 import time
 import wandb
+import argparse
 from cs336_basics.transformer import TransformerLM
 from cs336_basics.loss_function import cross_entropy
 from cs336_basics.optimizer import AdamW
+from cs336_basics.utils import get_batch
+from cs336_basics.bpe_tokenizier import BPETokenizer
+
+VOCAB_PATH = ""
 
 # --- Hyperparameters ---
 config = {
@@ -48,7 +53,7 @@ def get_dummy_weights(cfg):
     return weights
 
 
-def main():
+def train(file_path:str):
     # 1. Initialize W&B run in anonymous mode
     # No login required. A private link will be generated for you.
     wandb.init(
@@ -84,9 +89,14 @@ def main():
         lr=cfg.learning_rate
     )
 
+
+    tokenizer = BPETokenizer()
+
     # Create a dummy dataset and dataloader
-    train_data = torch.randint(0, cfg.vocab_size, (1000, cfg.context_length))
-    train_loader = torch.utils.data.DataLoader(train_data, batch_size=cfg.batch_size)
+    with open(file_path, 'rb') as train_file, open():
+        f.read
+        train_data = 
+    train_loader = get_batch(train_data, batch_size=cfg.batch_size, device=device)
     
     # 3. Training Loop
     start_time = time.time()
@@ -131,5 +141,17 @@ def main():
     wandb.finish()
     print("Training finished. Run logged to Weights & Biases.")
 
+def main():
+    parser = argparse.ArgumentParser()
+
+    # add arguments
+    parser.add_argument("--file", type=str, help="The path of a file")
+
+    args = parser.parse_args()
+
+    train(args.file)
+
 if __name__ == '__main__':
     main()
+
+    
